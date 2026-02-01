@@ -27,8 +27,15 @@ if ClienteRede:
 # 2: Jogo Rodando
 # 3: Game Over
 game_state = 0
-player_lives = 3
-selected_skin = 0  # 0: Normal, 1: Vermelho, 2: Verde
+player_lives = 99
+selected_skin = 0 
+# --- PERSONAGENS (linhas no pyxres) ---
+PERSONAGENS = [
+    {"nome": "HERO",   "idle_v": 16},  # (0,2)
+    {"nome": "NINJA",  "idle_v": 40},  # (0,5)
+    {"nome": "ROBOT",  "idle_v": 56},  # (0,7)
+    {"nome": "BEAST",  "idle_v": 72},  # (0,9)
+]
 
 camera_x = 0
 camera_y = 0
@@ -48,15 +55,38 @@ blade_speed = 1
 charge = 0
 sprite_liste = [0,8] 
 
-# Tiles e Mapas (Mantido original)
+# --- ITENS COLECIONÁVEIS ---
+# Definições dos tiles de itens do Pyxel Edit
+OURO = (2, 24)      # Tile (2, 24) - Player 1
+PRATA = (1, 24)     # Tile (1, 24) - Player 2  
+BRONZE = (0, 24)    # Tile (0, 24) - Players 3+
+TILE_VAZIO = (0, 0) # Tile vazio para substituir itens coletados
+
+# Pontuação por tipo de item
+PONTOS_POR_ITEM = {
+    OURO: 10,    # Player 1: 10 pontos
+    PRATA: 10,    # Player 2: 5 pontos
+    BRONZE: 10    # Players 3+: 2 pontos
+}
+
+# Itens coletados (armazena posições dos tiles coletados)
+itens_coletados = set()  # Formato: (tile_x, tile_y)
+
+# Pontuação dos jogadores
+pontuacao_jogadores = {}
+if rede:
+    pontuacao_jogadores[meu_id] = 0
+
+# Tiles e Mapas
 BLOC_JAUNE = (10,20); PETITE_PLANCHE = (0,26)
 LONGUE_PLANCHE_R = (3,26); LONGUE_PLANCHE = (2,26); LONGUE_PLANCHE_L = (1,26)
 tiles_sol_dur = [BLOC_JAUNE, PETITE_PLANCHE,LONGUE_PLANCHE,LONGUE_PLANCHE_L,LONGUE_PLANCHE_R]
 
 SOL_HERBE_L = (10, 27); SOL_HERBE = (11, 27); SOL_HERBE_R = (12, 27)
 SOL_BOIS_L = (1, 27); SOL_BOIS = (2, 27); SOL_BOIS_R = (3, 27) 
-PLANCHE_L = (1, 25); PLANCHE = (2, 25); PLANCHE_R = (3, 25)
-tiles_sol = [SOL_HERBE_L, SOL_HERBE, SOL_HERBE_R, SOL_BOIS_L, SOL_BOIS, SOL_BOIS_R, PLANCHE_L, PLANCHE, PLANCHE_R]
+PLANCHE_L = (0, 25); PLANCHE = (1, 25); PLANCHE_R = (2, 25)
+METAL_L = (3,25); METAL = (4,25); METAL_R = (5,25)
+tiles_sol = [SOL_HERBE_L, SOL_HERBE, SOL_HERBE_R, SOL_BOIS_L, SOL_BOIS, SOL_BOIS_R, PLANCHE_L, PLANCHE, PLANCHE_R, METAL_L, METAL, METAL_R]
 
 TERRE_L = (10,28); TERRE_L_DOWN = (10,29)
 TERRE_CENTER = (11,28); TERRE_CENTER_DOWN = (11,29)
@@ -64,20 +94,11 @@ TERRE_R = (12,28); TERRE_R_DOWN = (12,29)
 tiles_mur = [TERRE_L,TERRE_L_DOWN, TERRE_CENTER,TERRE_CENTER_DOWN, TERRE_R,TERRE_R_DOWN, BLOC_JAUNE, PETITE_PLANCHE, LONGUE_PLANCHE_R,LONGUE_PLANCHE,LONGUE_PLANCHE_L]
 tiles_plafond = [TERRE_CENTER_DOWN,TERRE_L_DOWN,TERRE_R_DOWN, BLOC_JAUNE, PETITE_PLANCHE, LONGUE_PLANCHE_L,LONGUE_PLANCHE,LONGUE_PLANCHE_R]
 
+
 # --- FUNÇÃO AUXILIAR DE SKIN ---
 def apply_skin(skin_id):
-    """Troca as cores baseadas na escolha"""
-    pyxel.pal() # Reset
-    if skin_id == 1: # Vermelho (Troca azul/ciano por vermelho/rosa)
-        pyxel.pal(1, 8)
-        pyxel.pal(5, 2)
-        pyxel.pal(6, 9)
-        pyxel.pal(12, 8)
-    elif skin_id == 2: # Verde (Troca azul por verde)
-        pyxel.pal(1, 3)
-        pyxel.pal(5, 11)
-        pyxel.pal(6, 3)
-        pyxel.pal(12, 11)
+    pyxel.pal()  # mantém compatibilidade, mas não muda cores
+
 
 # --- FUNÇÕES LÓGICAS ---
 def blade_reloaded(recharge):
@@ -135,21 +156,34 @@ def collision_sol_dur(x, y, vy):
     return y, vy
 
 def sprite_balance(sl):
-    # Lógica simplificada de animação
+    base_v = PERSONAGENS[selected_skin]["idle_v"]
     moving = False
+    
+    # Controle de velocidade da animação (opcional, para não ficar muito rápido)
+    animate = pyxel.frame_count % 2 == 0
+
     if pyxel.btn(pyxel.KEY_RIGHT) or pyxel.btn(pyxel.KEY_D):
-        sl[1] = 16
-        sl[0] += 8
+        sl[1] = base_v      # Define a linha da Direita
+        if animate:
+            sl[0] += 8
         moving = True
+
     elif pyxel.btn(pyxel.KEY_LEFT) or pyxel.btn(pyxel.KEY_Q):
-        sl[1] = 24
-        sl[0] += 8
+        sl[1] = base_v + 8  # Define a linha da Esquerda
+        if animate:
+            sl[0] += 8
         moving = True
-    
-    if moving and (sl[0] == 40 or sl[0] == 0): sl[0] = 0
-    if not moving: sl[0] = 0 # Idle frame
-    
+
+    # Reseta o ciclo se passar do último frame (56 = 7 * 8)
+    if sl[0] > 56:
+        sl[0] = 0
+
+    # SE ESTIVER PARADO:
+    if not moving:
+        sl[0] = 0
+        
     return sl
+
 
 def reset_player():
     global player_x, player_y, velocity_y
@@ -157,20 +191,119 @@ def reset_player():
     player_y = 56
     velocity_y = 0
 
+# --- FUNÇÕES PARA ITENS COLECIONÁVEIS ---
+
+def jogador_pode_coletar_tipo(jogador_id, tipo_tile):
+    """Define qual jogador pode coletar qual tipo de item baseado no tile"""
+    if jogador_id == 0:  # Player 1
+        return tipo_tile == OURO
+    elif jogador_id == 1:  # Player 2
+        return tipo_tile == PRATA
+    else:  # Players 3+
+        return tipo_tile == BRONZE
+
+def verificar_coleta_itens(jogador_id, jogador_x, jogador_y):
+    """Verifica se o jogador está sobre um item coletável"""
+    global itens_coletados, pontuacao_jogadores
+    
+    # Verifica uma área de 2x2 tiles ao redor do centro do jogador
+    center_tile_x = int(jogador_x // 8)
+    center_tile_y = int(jogador_y // 8)
+    
+    for offset_x in range(-1, 2):  # -1, 0, 1
+        for offset_y in range(-1, 2):  # -1, 0, 1
+            tile_x = center_tile_x + offset_x
+            tile_y = center_tile_y + offset_y
+            
+            # Verifica se está dentro dos limites do mapa
+            if (0 <= tile_x < pyxel.tilemaps[0].width and 
+                0 <= tile_y < pyxel.tilemaps[0].height):
+                
+                tile = pyxel.tilemaps[0].pget(tile_x, tile_y)
+                
+                # Se for um item coletável e ainda não foi coletado
+                if tile in [OURO, PRATA, BRONZE]:
+                    pos_key = (tile_x, tile_y)
+                    if pos_key in itens_coletados:
+                        continue
+                    
+                    # Verifica colisão pixel-perfect
+                    tile_px = tile_x * 8
+                    tile_py = tile_y * 8
+                    
+                    # O jogador tem 8x8 pixels, verifica se há sobreposição
+                    if (jogador_x < tile_px + 8 and 
+                        jogador_x + 8 > tile_px and
+                        jogador_y < tile_py + 8 and 
+                        jogador_y + 8 > tile_py):
+                        
+                        # Verifica se o jogador pode coletar este tipo de item
+                        if jogador_pode_coletar_tipo(jogador_id, tile):
+                            # Marca como coletado
+                            itens_coletados.add(pos_key)
+                            
+                            # Remove o item do mapa (substitui por tile vazio)
+                            pyxel.tilemaps[0].pset(tile_x, tile_y, TILE_VAZIO)
+                            
+                            # Calcula pontos
+                            pontos = PONTOS_POR_ITEM[tile]
+                            
+                            # Atualiza pontuação
+                            if jogador_id in pontuacao_jogadores:
+                                pontuacao_jogadores[jogador_id] += pontos
+                            else:
+                                pontuacao_jogadores[jogador_id] = pontos
+                            
+                            return True, tile, (tile_x, tile_y), pontos
+    
+    return False, None, None, 0
+
+def resetar_itens_coletados():
+    """Reseta todos os itens coletados - reconstrói o mapa original"""
+    global itens_coletados
+    
+    # Limpa a lista de itens coletados
+    itens_coletados.clear()
+    
+    # Precisa recarregar o tilemap original para restaurar os itens
+    # Em Pyxel, o tilemap é carregado do arquivo .pyxres
+    # Uma solução simples: recarregar o recurso
+    pyxel.load("main.pyxres")
+
+def desenhar_efeito_item(tile_x, tile_y, tile_type):
+    """Desenha um efeito visual nos itens não coletados"""
+    if pyxel.frame_count % 30 < 15:
+        px = tile_x * 8 - camera_x
+        py = tile_y * 8 - camera_y
+        
+        if tile_type == OURO:
+            cor = 10  # Amarelo/ouro
+        elif tile_type == PRATA:
+            cor = 7   # Cinza/prata
+        else:  # BRONZE
+            cor = 8   # Marrom/bronze
+        
+        # Desenha um quadrado brilhante ao redor
+        pyxel.rectb(px, py, 8, 8, cor)
+
 # --- UPDATES POR ESTADO ---
 
 def update_menu():
-    global selected_skin, game_state, player_lives
+    global selected_skin, game_state, player_lives, pontuacao_jogadores
     
     # Seleção de Personagem
     if pyxel.btnp(pyxel.KEY_RIGHT) or pyxel.btnp(pyxel.KEY_D):
-        selected_skin = (selected_skin + 1) % 3
+        selected_skin = (selected_skin + 1) % len(PERSONAGENS)
     if pyxel.btnp(pyxel.KEY_LEFT) or pyxel.btnp(pyxel.KEY_Q):
-        selected_skin = (selected_skin - 1) % 3
+        selected_skin = (selected_skin - 1) % len(PERSONAGENS)
+        if selected_skin < 0:
+            selected_skin = len(PERSONAGENS) - 1
         
     # Confirmar
     if pyxel.btnp(pyxel.KEY_SPACE) or pyxel.btnp(pyxel.GAMEPAD1_BUTTON_A):
-        player_lives = 3 # Reseta vidas
+        player_lives = 99 # Reseta vidas
+        resetar_itens_coletados()  # Reseta itens coletados
+        pontuacao_jogadores = {meu_id: 0}  # Reseta pontuação
         game_state = 1   # Vai para tela de vidas
 
 def update_pregame():
@@ -183,6 +316,7 @@ def update_pregame():
 def update_game():
     global player_x, player_y, velocity_y, on_ground, camera_x, camera_y
     global bladeliste, charge, sprite_liste, outros_jogadores, player_lives, game_state
+    global pontuacao_jogadores
 
     # 1. Física
     sprite_liste = sprite_balance(sprite_liste)
@@ -209,18 +343,44 @@ def update_game():
     
     player_y += velocity_y
 
-    # 2. Rede (Envia Skin junto)
+    # 2. Verificar coleta de itens
+    coletou, tipo_item, pos_item, pontos = verificar_coleta_itens(meu_id, player_x, player_y)
+    
+    # 3. Rede (Envia Skin, pontuação e itens coletados)
     if rede:
         meus_dados = {
             "id": meu_id,
             "x": player_x, "y": player_y,
             "u": sprite_liste[0], "v": sprite_liste[1],
-            "skin": selected_skin # <--- ENVIA A COR ESCOLHIDA
+            "skin": selected_skin,
+            "pontos": pontuacao_jogadores.get(meu_id, 0),
+            "coletou": coletou,
+            "tipo_item": tipo_item if coletou else None,
+            "pos_item": pos_item if coletou else None
         }
         recebido = rede.enviar(meus_dados)
-        if recebido: outros_jogadores = recebido
+        if recebido: 
+            outros_jogadores = recebido
+            # Atualiza pontuações dos outros jogadores
+            for pid, dados in recebido.items():
+                if pid != meu_id and "pontos" in dados:
+                    pontuacao_jogadores[pid] = dados["pontos"]
+                
+                # Se outro jogador coletou um item, remove do mapa local também
+                if (pid != meu_id and "coletou" in dados and 
+                    dados["coletou"] and "pos_item" in dados and 
+                    dados["pos_item"]):
+                    
+                    tile_x, tile_y = dados["pos_item"]
+                    pos_key = (tile_x, tile_y)
+                    
+                    # Marca como coletado localmente
+                    itens_coletados.add(pos_key)
+                    
+                    # Remove do mapa local
+                    pyxel.tilemaps[0].pset(tile_x, tile_y, TILE_VAZIO)
 
-    # 3. Câmera
+    # 4. Câmera
     screen_width, screen_height = 128, 128
     map_width = pyxel.tilemaps[0].width * 8
     
@@ -232,7 +392,7 @@ def update_game():
     elif player_y > camera_y + 128 - margin: camera_y += (player_y - (camera_y + 128 - margin)) * 0.2
     camera_y = max(0, min(camera_y, pyxel.tilemaps[0].height * 8 - 128))
 
-    # 4. Morte / Respawn
+    # 5. Morte / Respawn
     if player_y > 200 or pyxel.btn(pyxel.KEY_R):
         player_lives -= 1
         if player_lives <= 0:
@@ -254,15 +414,23 @@ def draw_menu():
         pyxel.text(75, 60, ">", 7)
     
     # Desenha Personagem com a Skin
-    apply_skin(selected_skin)
-    pyxel.blt(58, 56, 0, 0, 16, 8, 8, 5) # Desenha parado
-    pyxel.pal() # Reset
+    char = PERSONAGENS[selected_skin]
+
+    pyxel.blt(58, 56, 0, 0, char["idle_v"], 8, 8, 5)
+    pyxel.text(
+        64 - len(char["nome"]) * 2,
+        75,
+        char["nome"],
+        7
+    )
     
-    # Nome da Skin
-    nomes = ["CLASSIC", "RED HOT", "FOREST"]
-    pyxel.text(64 - len(nomes[selected_skin])*2, 75, nomes[selected_skin], 7)
+    # Informação sobre os itens
+    pyxel.text(20, 90, "COLLECTIBLES:", 7)
+    pyxel.text(20, 100, "P1: GOLD ONLY", 10)
+    pyxel.text(20, 108, "P2: SILVER ONLY", 7)
+    pyxel.text(20, 116, "P3+: BRONZE ONLY", 8)
     
-    pyxel.text(35, 100, "PRESS SPACE", 10)
+    pyxel.text(35, 125, "PRESS SPACE", 10)
 
 def draw_pregame():
     pyxel.cls(0)
@@ -280,11 +448,38 @@ def draw_pregame():
 
 def draw_game_screen():
     pyxel.cls(6)
+    
+    # Desenha o tilemap (os itens já removidos não aparecerão)
     pyxel.bltm(0, 0, 0, camera_x , camera_y , 128, 128, 5)
     
-    # HUD de Vidas no canto da tela
+    # Desenha efeitos visuais nos itens que ainda não foram coletados
+    # Percorre área visível da câmera
+    start_x = max(0, int(camera_x // 8) - 1)
+    start_y = max(0, int(camera_y // 8) - 1)
+    end_x = min(pyxel.tilemaps[0].width, int((camera_x + 128) // 8) + 1)
+    end_y = min(pyxel.tilemaps[0].height, int((camera_y + 128) // 8) + 1)
+    
+    for y in range(start_y, end_y):
+        for x in range(start_x, end_x):
+            # Verifica se este tile ainda não foi coletado
+            if (x, y) not in itens_coletados:
+                tile = pyxel.tilemaps[0].pget(x, y)
+                if tile in [OURO, PRATA, BRONZE]:
+                    desenhar_efeito_item(x, y, tile)
+    
+    # HUD de Vidas e Pontuação
     pyxel.text(2, 2, f"LIFE:{player_lives}", 8)
-    if rede: pyxel.text(100, 2, f"P{meu_id+1}", 11)
+    if meu_id in pontuacao_jogadores:
+        pyxel.text(2, 10, f"SCORE:{pontuacao_jogadores[meu_id]}", 10)
+    
+    if rede: 
+        pyxel.text(100, 2, f"P{meu_id+1}", 11)
+        # Mostra pontuação de outros jogadores
+        y_offset = 10
+        for pid, pontos in pontuacao_jogadores.items():
+            if pid != meu_id:
+                pyxel.text(100, y_offset, f"P{pid+1}:{pontos}", 7)
+                y_offset += 8
 
     # Desenha Player Local
     apply_skin(selected_skin)
@@ -298,18 +493,23 @@ def draw_game_screen():
                 px, py = dados["x"], dados["y"]
                 skin_remota = dados.get("skin", 0)
                 
-                apply_skin(skin_remota) # Aplica a cor do amigo
+                apply_skin(skin_remota)
                 pyxel.blt(px - camera_x, py - camera_y, 0, dados["u"], dados["v"], 8, 8, 5)
-                pyxel.pal() # Reset
+                pyxel.pal()
                 
                 pyxel.text(px - camera_x, py - camera_y - 6, f"P{pid+1}", 7)
 
     for blade in bladeliste:
-        pyxel.blt(blade[0],blade[1],0,48,88,8,8,5) 
+        pyxel.blt(blade[0], blade[1], 0, 48, 88, 8, 8, 5)
 
 def draw_gameover():
     pyxel.cls(0)
     pyxel.text(45, 50, "GAME OVER", 8)
+    
+    # Mostra pontuação final
+    if meu_id in pontuacao_jogadores:
+        pyxel.text(45, 60, f"SCORE: {pontuacao_jogadores[meu_id]}", 7)
+    
     pyxel.text(25, 70, "PRESS R TO RESTART", 7)
     if pyxel.btn(pyxel.KEY_R):
         global game_state
@@ -318,7 +518,6 @@ def draw_gameover():
 # --- MAIN LOOPS ---
 
 def update():
-    # Declaramos o global logo no início da função para evitar o SyntaxError
     global game_state
     
     if game_state == 0:
@@ -328,13 +527,10 @@ def update():
     elif game_state == 2:
         update_game()
     elif game_state == 3: 
-        # Se estiver em Game Over, espera o R para voltar ao menu
         if pyxel.btn(pyxel.KEY_R): 
             game_state = 0
 
 def draw():
-    # O draw apenas lê o game_state, então não precisa obrigatoriamente de global,
-    # mas é boa prática manter a consistência.
     if game_state == 0:
         draw_menu()
     elif game_state == 1:
