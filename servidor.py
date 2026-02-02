@@ -16,6 +16,7 @@ def get_local_ip():
 class ServidorPlatformer:
     def __init__(self):
         self.jogadores = {} 
+        self.jogadores_prontos = {}  # Dicionário para rastrear jogadores prontos
         self.ip_local = get_local_ip()
         self.porta = 5555
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -36,7 +37,11 @@ class ServidorPlatformer:
                 # Novo Jogador (Handshake)
                 if isinstance(conteudo, list):
                     pid = len(self.jogadores)
-                    self.jogadores[pid] = {"x": 60, "y": 60, "u": 0, "v": 0, "skin": 0, "addr": addr}
+                    self.jogadores[pid] = {
+                        "x": 60, "y": 60, "u": 0, "v": 0, 
+                        "skin": -1, "addr": addr, "pronto": False
+                    }
+                    self.jogadores_prontos[pid] = False
                     print(f"[CONEXÃO] Player {pid+1} vindo de {addr}")
                     self.sock.sendto(pickle.dumps({"player_id": pid}), addr)
                     continue
@@ -45,16 +50,40 @@ class ServidorPlatformer:
                 if isinstance(conteudo, dict) and "id" in conteudo:
                     pid = conteudo["id"]
                     if pid in self.jogadores:
+                        # Atualiza dados do jogador
                         self.jogadores[pid].update({
                             "x": conteudo["x"], "y": conteudo["y"],
                             "u": conteudo["u"], "v": conteudo["v"],
-                            "skin": conteudo.get("skin", 0)
+                            "skin": conteudo.get("skin", -1)
                         })
+                        
+                        # Marca como pronto se tiver skin escolhida (skin diferente de -1)
+                        if conteudo.get("skin", -1) >= 0:
+                            self.jogadores[pid]["pronto"] = True
+                            self.jogadores_prontos[pid] = True
+                        else:
+                            self.jogadores[pid]["pronto"] = False
+                            self.jogadores_prontos[pid] = False
 
-                    # Envia o estado de todos os outros para o cliente
-                    # Filtramos o 'addr' para não enviar dados sensíveis/desnecessários
-                    estado_compacto = {k: {i: v[i] for i in v if i != 'addr'} for k, v in self.jogadores.items()}
-                    self.sock.sendto(pickle.dumps(estado_compacto), addr)
+                    # Prepara resposta com estado de todos os jogadores
+                    estado_compacto = {}
+                    for k, v in self.jogadores.items():
+                        estado_compacto[k] = {
+                            "x": v["x"], "y": v["y"],
+                            "u": v["u"], "v": v["v"],
+                            "skin": v["skin"],
+                            "pronto": v["pronto"]
+                        }
+                    
+                    # Adiciona flag global de jogo pronto
+                    todos_prontos = all(self.jogadores_prontos.values()) and len(self.jogadores) >= 2
+                    resposta = {
+                        "estado_jogadores": estado_compacto,
+                        "jogo_pronto": todos_prontos,
+                        "total_jogadores": len(self.jogadores)
+                    }
+                    
+                    self.sock.sendto(pickle.dumps(resposta), addr)
 
             except Exception as e:
                 print(f"Erro no processamento: {e}")
@@ -64,7 +93,10 @@ class ServidorPlatformer:
         t.start()
         # Mantém o programa vivo
         try:
-            while True: time.sleep(1)
+            while True: 
+                # Mostra status periodicamente
+                print(f"\r[Jogadores conectados: {len(self.jogadores)} | Prontos: {sum(self.jogadores_prontos.values())}]", end="")
+                time.sleep(5)
         except KeyboardInterrupt:
             print("\nEncerrando servidor...")
 
