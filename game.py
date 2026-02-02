@@ -1,9 +1,5 @@
 import pyxel
-try:
-    from cliente import ClienteRede
-except ImportError:
-    print("Aviso: arquivo cliente.py não encontrado.")
-    ClienteRede = None
+from cliente import ClienteRede
 
 pyxel.init(128, 128, title="Super Jump Online", fps=30)
 pyxel.load("main.pyxres")
@@ -16,20 +12,15 @@ outros_jogadores = {}
 jogo_pronto = False  # Nova flag para indicar se o jogo pode começar
 total_jogadores = 0
 
-if ClienteRede:
-    try:
-        rede = ClienteRede()
-        meu_id = rede.player_id
-    except:
-        print("Falha ao conectar. Jogando em modo Offline.")
+try:
+    rede = ClienteRede()
+    meu_id = rede.player_id
+except Exception as e:
+    print(f"Falha ao conectar: {e}")
+    print("O jogo requer conexão com o servidor. Saindo...")
+    pyxel.quit()
+    exit()
 
-# --- ESTADOS DO JOGO ---
-# 0: Menu Seleção Personagem
-# 1: Tela de Aguardo (Esperando outros jogadores)
-# 2: Tela de Vidas
-# 3: Jogo Rodando
-# 4: Game Over
-# 5: Fase Completa
 game_state = 0
 player_lives = 3
 selected_skin = -1  # Alterado para -1 inicialmente (nenhuma skin escolhida)
@@ -73,8 +64,8 @@ FIM_FASE = (2, 21)      # Tile (2, 21) - Fim da Fase
 # Pontuação por tipo de item
 PONTOS_POR_ITEM = {
     OURO: 10,    # Player 1: 10 pontos
-    PRATA: 5,    # Player 2: 5 pontos
-    BRONZE: 2    # Players 3+: 2 pontos
+    PRATA: 10,    # Player 2: 5 pontos
+    BRONZE: 10    # Players 3+: 2 pontos
 }
 
 # Bonus por completar fase
@@ -89,8 +80,7 @@ checkpoints_coletados = set()  # Formato: (tile_x, tile_y) - todos checkpoints c
 
 # Pontuação dos jogadores
 pontuacao_jogadores = {}
-if rede:
-    pontuacao_jogadores[meu_id] = 0
+pontuacao_jogadores[meu_id] = 0
 
 # Tiles e Mapas
 BLOC_JAUNE = (10,20); PETITE_PLANCHE = (0,26)
@@ -110,7 +100,6 @@ tiles_mur = [TERRE_L,TERRE_L_DOWN, TERRE_CENTER,TERRE_CENTER_DOWN, TERRE_R,TERRE
 tiles_plafond = [TERRE_CENTER_DOWN,TERRE_L_DOWN,TERRE_R_DOWN, BLOC_JAUNE, PETITE_PLANCHE, LONGUE_PLANCHE_L,LONGUE_PLANCHE,LONGUE_PLANCHE_R]
 
 
-# --- FUNÇÃO AUXILIAR DE SKIN ---
 def apply_skin(skin_id):
     pyxel.pal()  # mantém compatibilidade, mas não muda cores
 
@@ -202,7 +191,6 @@ def sprite_balance(sl):
         
     return sl
 
-
 def reset_player():
     global player_x, player_y, velocity_y
     # Se tem checkpoint, respawna lá, senão no início
@@ -212,8 +200,6 @@ def reset_player():
         player_x = 10
         player_y = 56
     velocity_y = 0
-
-# --- FUNÇÕES PARA ITENS COLECIONÁVEIS ---
 
 def jogador_pode_coletar_tipo(jogador_id, tipo_tile):
     """Define qual jogador pode coletar qual tipo de item baseado no tile"""
@@ -385,8 +371,6 @@ def desenhar_efeito_item(tile_x, tile_y, tile_type):
                 # Desenha um segundo brilho para checkpoint ativo
                 pyxel.rectb(px-1, py-1, 10, 10, 13)  # Branco/amarelo
 
-# --- UPDATES POR ESTADO ---
-
 def update_menu():
     global selected_skin, game_state
     
@@ -399,32 +383,20 @@ def update_menu():
             selected_skin = len(PERSONAGENS) - 1
         
     # Confirmar personagem
-    if pyxel.btnp(pyxel.KEY_SPACE) or pyxel.btnp(pyxel.GAMEPAD1_BUTTON_A):
+    if pyxel.btnp(pyxel.KEY_SPACE):
         if selected_skin >= 0:  # Só confirma se uma skin foi escolhida
-            if rede:
-                # Envia dados para o servidor informando a escolha
-                dados = {
-                    "id": meu_id,
-                    "x": player_x, "y": player_y,
-                    "u": sprite_liste[0], "v": sprite_liste[1],
-                    "skin": selected_skin
-                }
-                rede.enviar(dados)
-                game_state = 1  # Vai para tela de aguardo
-            else:
-                # Modo offline, vai direto para o jogo
-                player_lives = 99
-                resetar_itens_coletados()
-                pontuacao_jogadores[meu_id] = 0
-                game_state = 2  # Vai direto para tela de vidas
+            # Envia dados para o servidor informando a escolha
+            dados = {
+                "id": meu_id,
+                "x": player_x, "y": player_y,
+                "u": sprite_liste[0], "v": sprite_liste[1],
+                "skin": selected_skin
+            }
+            rede.enviar(dados)
+            game_state = 1  # Vai para tela de aguardo
 
 def update_aguardo():
     global game_state, jogo_pronto, total_jogadores, outros_jogadores, player_lives
-    
-    # Se não estiver conectado, vai direto para o jogo
-    if not rede:
-        game_state = 2
-        return
     
     # Atualiza dados com o servidor para verificar status
     dados = {
@@ -463,7 +435,7 @@ def update_aguardo():
 def update_pregame():
     global game_state
     # Apenas espera confirmar para começar
-    if pyxel.btnp(pyxel.KEY_SPACE) or pyxel.btnp(pyxel.GAMEPAD1_BUTTON_A):
+    if pyxel.btnp(pyxel.KEY_SPACE):
         reset_player()
         game_state = 3  # Jogo rodando
 
@@ -487,7 +459,7 @@ def update_game():
     # Pulo
     if on_ground:
         velocity_y = 0
-        if pyxel.btnp(pyxel.KEY_SPACE) or pyxel.btn(pyxel.GAMEPAD1_BUTTON_A):
+        if pyxel.btnp(pyxel.KEY_SPACE):
             velocity_y = jump_force
             on_ground = False
     elif est_plafond(player_x, player_y - 1) and est_plafond(player_x +7, player_y -1):
@@ -504,57 +476,52 @@ def update_game():
     evento, pos_checkpoint = verificar_checkpoint_fim(player_x, player_y)
     
     # 4. Rede (Envia Skin, pontuação e itens coletados)
-    if rede:
-        meus_dados = {
-            "id": meu_id,
-            "x": player_x, "y": player_y,
-            "u": sprite_liste[0], "v": sprite_liste[1],
-            "skin": selected_skin,
-            "pontos": pontuacao_jogadores.get(meu_id, 0),
-            "coletou": coletou,
-            "tipo_item": tipo_item if coletou else None,
-            "pos_item": pos_item if coletou else None,
-            "evento": evento,
-            "pos_checkpoint": pos_checkpoint if evento and "checkpoint" in evento else None,
-            "fim_fase": True if evento == "fim_fase" else False
-        }
-        recebido = rede.enviar(meus_dados)
-        if recebido and "estado_jogadores" in recebido: 
-            outros_jogadores = recebido["estado_jogadores"]
-            # Atualiza pontuações dos outros jogadores
-            for pid, dados in outros_jogadores.items():
-                if pid != meu_id and "pontos" in dados:
-                    pontuacao_jogadores[pid] = dados["pontos"]
+    meus_dados = {
+        "id": meu_id,
+        "x": player_x, "y": player_y,
+        "u": sprite_liste[0], "v": sprite_liste[1],
+        "skin": selected_skin,
+        "pontos": pontuacao_jogadores.get(meu_id, 0),
+        "coletou": coletou,
+        "tipo_item": tipo_item if coletou else None,
+        "pos_item": pos_item if coletou else None,
+        "evento": evento,
+        "pos_checkpoint": pos_checkpoint if evento and "checkpoint" in evento else None,
+        "fim_fase": True if evento == "fim_fase" else False
+    }
+    recebido = rede.enviar(meus_dados)
+    if recebido and "estado_jogadores" in recebido: 
+        outros_jogadores = recebido["estado_jogadores"]
+        # Atualiza pontuações dos outros jogadores
+        for pid, dados in outros_jogadores.items():
+            if pid != meu_id and "pontos" in dados:
+                pontuacao_jogadores[pid] = dados["pontos"]
+            
+            # Se outro jogador coletou um item, remove do mapa local também
+            if (pid != meu_id and "coletou" in dados and 
+                dados["coletou"] and "pos_item" in dados and 
+                dados["pos_item"]):
                 
-                # Se outro jogador coletou um item, remove do mapa local também
-                if (pid != meu_id and "coletou" in dados and 
-                    dados["coletou"] and "pos_item" in dados and 
-                    dados["pos_item"]):
-                    
-                    tile_x, tile_y = dados["pos_item"]
-                    pos_key = (tile_x, tile_y)
-                    
-                    # Marca como coletado localmente
-                    itens_coletados.add(pos_key)
-                    
-                    # Remove do mapa local
-                    pyxel.tilemaps[0].pset(tile_x, tile_y, TILE_VAZIO)
+                tile_x, tile_y = dados["pos_item"]
+                pos_key = (tile_x, tile_y)
                 
-                # Se outro jogador ativou checkpoint
-                if (pid != meu_id and "evento" in dados and 
-                    dados["evento"] and "checkpoint" in dados["evento"] and
-                    "pos_checkpoint" in dados and dados["pos_checkpoint"]):
-                    
-                    tile_x, tile_y = dados["pos_checkpoint"]
-                    pos_key = (tile_x, tile_y)
-                    
-                    # Marca checkpoint como coletado
-                    if pos_key not in checkpoints_coletados:
-                        checkpoints_coletados.add(pos_key)
-                    
-                    # Se for o último checkpoint deste jogador, atualiza visualmente
-                    # (Cada jogador tem seu próprio checkpoint ativo)
-
+                # Marca como coletado localmente
+                itens_coletados.add(pos_key)
+                
+                # Remove do mapa local
+                pyxel.tilemaps[0].pset(tile_x, tile_y, TILE_VAZIO)
+            
+            # Se outro jogador ativou checkpoint
+            if (pid != meu_id and "evento" in dados and 
+                dados["evento"] and "checkpoint" in dados["evento"] and
+                "pos_checkpoint" in dados and dados["pos_checkpoint"]):
+                
+                tile_x, tile_y = dados["pos_checkpoint"]
+                pos_key = (tile_x, tile_y)
+                
+                # Marca checkpoint como coletado
+                if pos_key not in checkpoints_coletados:
+                    checkpoints_coletados.add(pos_key)
     # 5. Câmera
     screen_width, screen_height = 128, 128
     map_width = pyxel.tilemaps[0].width * 8
@@ -580,7 +547,7 @@ def update_game():
 def update_fase_completa():
     global game_state
     # Espera confirmar para voltar ao menu
-    if pyxel.btnp(pyxel.KEY_SPACE) or pyxel.btnp(pyxel.GAMEPAD1_BUTTON_A) or pyxel.btnp(pyxel.KEY_R):
+    if pyxel.btnp(pyxel.KEY_SPACE) or pyxel.btnp(pyxel.KEY_R):
         game_state = 0
 
 # --- DRAWS POR ESTADO ---
@@ -632,7 +599,7 @@ def draw_aguardo():
     
     y_offset = 60
     outros_count = 0
-    if rede and outros_jogadores:
+    if outros_jogadores:
         for pid, dados in outros_jogadores.items():
             if pid != meu_id:
                 skin_outro = dados.get("skin", -1)
@@ -689,8 +656,6 @@ def draw_game_screen():
     # Desenha o tilemap (os itens já removidos não aparecerão)
     pyxel.bltm(0, 0, 0, camera_x , camera_y , 128, 128, 5)
     
-    # Desenha efeitos visuais nos itens que ainda não foram coletados
-    # Percorre área visível da câmera
     start_x = max(0, int(camera_x // 8) - 1)
     start_y = max(0, int(camera_y // 8) - 1)
     end_x = min(pyxel.tilemaps[0].width, int((camera_x + 128) // 8) + 1)
@@ -716,14 +681,13 @@ def draw_game_screen():
         # Mostra quantos checkpoints coletados
         pyxel.text(2, 26, f"CP: {len(checkpoints_coletados)}", 12)
     
-    if rede: 
-        pyxel.text(100, 2, f"P{meu_id+1}", 11)
-        # Mostra pontuação de outros jogadores
-        y_offset = 10
-        for pid, pontos in pontuacao_jogadores.items():
-            if pid != meu_id:
-                pyxel.text(100, y_offset, f"P{pid+1}:{pontos}", 7)
-                y_offset += 8
+    pyxel.text(100, 2, f"P{meu_id+1}", 11)
+    # Mostra pontuação de outros jogadores
+    y_offset = 10
+    for pid, pontos in pontuacao_jogadores.items():
+        if pid != meu_id:
+            pyxel.text(100, y_offset, f"P{pid+1}:{pontos}", 7)
+            y_offset += 8
 
     # Desenha Player Local
     if selected_skin >= 0:
@@ -732,7 +696,7 @@ def draw_game_screen():
         pyxel.pal() # Reset palette
 
     # Desenha Outros Jogadores
-    if rede and outros_jogadores:
+    if outros_jogadores:
         for pid, dados in outros_jogadores.items():
             if pid != meu_id:
                 px, py = dados["x"], dados["y"]
@@ -802,8 +766,6 @@ def draw_fase_completa():
         pyxel.text(20, 102, "GOOD EFFORT!", 7)
     
     pyxel.text(30, 115, "PRESS SPACE TO CONTINUE", 10)
-
-# --- MAIN LOOPS ---
 
 def update():
     global game_state
